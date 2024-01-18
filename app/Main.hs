@@ -25,103 +25,75 @@ constructMessage user = do
     let msgString = (subjectsObjects !! objIndex) <> " " <> (verbs !! verbIndex) <> " " <> (subjectsObjects !! subjIndex) <> " " <> sentimentWord
     return (Message msgString sentiment (name user)) 
 
-{--initUser :: String -> IO User
-initUser x = do
-    m <- newMVar 0
-    im <- newEmptyMVar
-    let u = User{name = x, messages = [], mood = m, inMsg = im}
-    return u
---}
-simulateUserInbox :: User -> Counter -> IO()
-simulateUserInbox user (Counter counter) = loop
+sendMessages :: MVar User -> [MVar User] -> MVar Int -> IO()
+sendMessages sender recipients count = loop
     where
         loop = do
-            inm <- takeMVar (inMsg user)
-            putStrLn "stuck"
-            m <- takeMVar (mood user)
-            count <- takeMVar counter
-            case inm of
-                Empty -> do
-                    putStrLn (" p ")
-                _ -> do
-                    putStrLn "hello"
-                    case (sentiment inm) of
-                                Good -> putMVar (mood user) (m + 1000)
-                                Bad -> putMVar (mood user) (m - 1000)
-                    loop
-
-simulateUserOutbox :: User -> [User] -> Counter -> IO()
-simulateUserOutbox user recipients (Counter counter) = loop
-    where
-        loop = do
-            count <- takeMVar counter
-            case (count <= limit) of
+            --taking and putting back, we just want to check mood value
+            ctr <- readMVar count
+            sndr <- readMVar sender
+            --putMVar sender sndr
+            recipientIndex <- randomRIO (0, (length recipients)-1)
+            receiver <- takeMVar (recipients !! recipientIndex)
+            case (sndr == receiver) of
                 True -> do
-                    ---putStrLn ("here "<> name user <>" outbox")
-                    msg <- constructMessage user
-                    recipientIndex <- randomRIO (0, (length recipients) -1)
-                    let recipient = recipients !! recipientIndex
-                    --not sending messages to themselves
-                    case (recipient == user) of
+                    --putStrLn "same guy"
+                    putMVar (recipients !! recipientIndex) receiver
+                    threadDelay 10
+                    loop
+                False -> do
+                    case (ctr < limit) of
                         True -> do
-                            putStrLn "same guy"
-                            putMVar counter count
+                            msg <- constructMessage sndr
+                            let m = mood sndr
+                            let moodDelay = (200000 - m)
+                            randomDelay <- randomRIO (0, moodDelay)
+                            threadDelay (moodDelay + randomDelay) 
+                            case sentiment msg of
+                                Good -> do
+                                    let newUser = User{name = (name receiver), mood = (mood receiver + 10000),
+                                                        messages = (messages receiver) ++ [msg]}
+                                    putMVar (recipients !! recipientIndex) newUser
+                                    modifyMVar_ count (\counter -> return (counter + 1))
+                                    --putStrLn "sent good msg"
+                                Bad -> do
+                                    let newUser = User{name = (name receiver), mood = (mood receiver - 10000),
+                                                        messages = (messages receiver) ++ [msg]}
+                                    putMVar (recipients !! recipientIndex) newUser
+                                    modifyMVar_ count (\counter -> return (counter + 1))
+                                    --putStrLn "sent bad msg"
+                            --putStrLn ((show ctr) <>" "<>(show (index sndr)))
+                            threadDelay 10
                             loop
                         False -> do
-                            m <- takeMVar (mood user)
-                            let moodDelay = (20000-m)
-                            randomDelay <- randomRIO (0, 100000)
-                            threadDelay (randomDelay + moodDelay) 
-                            putMVar (inMsg recipient) msg
-                            putStrLn "sent"
-                            putMVar (mood user) m
-                            putMVar counter (count + 1)
-                            loop
-                False -> do
-                    putMVar counter count
-                    closeInboxes recipients
-                    --putStrLn ("closing "<>(name user)<>" outbox")
+                            putMVar (recipients !! recipientIndex) receiver
+                            return ()
 
-closeInboxes :: [User] -> IO()
-closeInboxes [] = putStrLn "inboxes closed"
-closeInboxes (x:xs) = do
-        putMVar (inMsg x) Empty
-        closeInboxes xs
+
+
+prettyPrintMessage :: Message -> IO()
+prettyPrintMessage msg = do
+    putStr ("From: "<>(from msg))
+    putStrLn(" Message body: "<>(content msg))
+
+prettyPrintUser :: MVar User -> IO()
+prettyPrintUser mperson = do
+    person <- readMVar mperson
+    putStrLn ("\nName: "<>(name person))
+    putStrLn ("Received: "<>show(length (messages person))<>" messages")
+    case ((mood person) < 0) of
+        True -> do
+            putStrLn ("They were mostly mean messages. Their current mood is: "<>show(mood person))
+        False -> do
+            putStrLn ("They were mostly nice messages. Their current mood is: "<>show(mood person))
+    putStrLn "Inbox \n"
+    mapM_ prettyPrintMessage (messages person)
 
 main :: IO ()
 main = do
-    let users = [User {name = x, messages = [], mood <- newMVar 0, inMsg <- newEmptyMVar} | x <- names]
+    let users = [User{name = x, mood = 0, messages = []} | x <- names]
     ctr <- newMVar 0
-    let count = Counter ctr
-    let firstUser = users !! 0
-    let sndUser = users !! 1
-    let thdUser = users !! 2
-    let frthUser = users !! 3
-    let ffthUser = users !! 4
-    let sxthUser = users !! 5
-    let svnthUser = users !! 6
-    let eightthUser = users !! 7
-    let nnthUser = users !! 8
-    let tenthUser = users !! 9
-    _ <- forkIO (simulateUserOutbox firstUser users count)
-    _ <- forkIO (simulateUserInbox firstUser count)
-    _ <- forkIO (simulateUserOutbox sndUser users count)
-    _ <- forkIO (simulateUserInbox sndUser count)
-    _ <- forkIO (simulateUserOutbox thdUser users count)
-    _ <- forkIO (simulateUserInbox thdUser count)
-    _ <- forkIO (simulateUserOutbox frthUser users count)
-    _ <- forkIO (simulateUserInbox frthUser count)
-    _ <- forkIO (simulateUserOutbox ffthUser users count)
-    _ <- forkIO (simulateUserInbox ffthUser count)
-    _ <- forkIO (simulateUserOutbox sxthUser users count)
-    _ <- forkIO (simulateUserInbox sxthUser count)
-    _ <- forkIO (simulateUserOutbox svnthUser users count)
-    _ <- forkIO (simulateUserInbox svnthUser count)
-    _ <- forkIO (simulateUserOutbox eightthUser users count)
-    _ <- forkIO (simulateUserInbox eightthUser count)
-    _ <- forkIO (simulateUserOutbox nnthUser users count)
-    _ <- forkIO (simulateUserInbox nnthUser count)
-    _ <- forkIO (simulateUserOutbox tenthUser users count)
-    _ <- forkIO (simulateUserInbox tenthUser count)
+    userList <- mapM newMVar users
+    mapM_ (\user -> forkIO $ sendMessages user userList ctr) userList
+    mapM_ prettyPrintUser userList
 
-    putStrLn "x"
