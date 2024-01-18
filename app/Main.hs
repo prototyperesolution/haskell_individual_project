@@ -25,15 +25,15 @@ constructMessage user = do
     let msgString = (subjectsObjects !! objIndex) <> " " <> (verbs !! verbIndex) <> " " <> (subjectsObjects !! subjIndex) <> " " <> sentimentWord
     return (Message msgString sentiment (name user)) 
 
-initUser :: IO User
+initUser :: String -> IO User
 initUser x = do
-    m <- newMVar 0.0
+    m <- newMVar 0
     im <- newEmptyMVar
     let u = User{name = x, messages = [], mood = m, inMsg = im}
     return u
 
-simulateUserInbox :: User -> IO()
-simulateUserInbox user counter = loop
+simulateUserInbox :: User -> Counter -> IO()
+simulateUserInbox user (Counter counter) = loop
     where
         loop = do
             msg <- takeMVar (inMsg user)
@@ -42,32 +42,38 @@ simulateUserInbox user counter = loop
             case (count < 100) of
                 True -> do
                     case (sentiment msg) of
-                        Good -> putMVar (mood user) (m + 0.01)
-                        Bad -> putMVar (mood user) (m - 0.01)
+                        Good -> putMVar (mood user) (m + 10000)
+                        Bad -> putMVar (mood user) (m - 10000)
                     putMVar counter count
                 False -> do
-                    putStrLn "Closing Inbox"
+                    putStrLn ("Closing " <> (name user) <>" Inbox")
 
-simulateUserOutbox :: User -> [IO User] -> IO()
-simulateUserOutbox user recipients counter = loop
+simulateUserOutbox :: User -> [IO User] -> Counter -> IO()
+simulateUserOutbox user recipients (Counter counter) = loop
     where
         loop = do
-            let msg = constructMessage user
-            recipientIndex <- randomRIO (0, (length recipients) -1)
-            recipient <- recipients !! recipientIndex
             count <- takeMVar counter
-            --not sending messages to themselves
-            case (recipient == user) of
-                True -> loop
+            case (count < 100) of
+                True -> do
+                    msg <- constructMessage user
+                    recipientIndex <- randomRIO (0, (length recipients) -1)
+                    recipient <- recipients !! recipientIndex
+                    --not sending messages to themselves
+                    case (recipient == user) of
+                        True -> loop
+                        False -> do
+                            m <- takeMVar (mood user)
+                            threadDelay (2000000-m) 
+                            putMVar (inMsg recipient) msg
+                            putMVar (mood user) m
+                            putMVar counter (count + 1)
+                            loop
                 False -> do
-                    m <- takeMVar (mood user)
-                    threadDelay ((2 - m)*10000)
-                    putMVar (inMsg recipient) msg
-                    putMVar (mood user) m
-                    putMVar counter (count + 1)
+                    putStrLn ("Closing " <> (name user) <>" Outbox")
 
 main :: IO ()
 main = do
     let users = [initUser x | x <- names]
     ctr <- newMVar 0
     let count = Counter ctr
+    
