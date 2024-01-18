@@ -11,16 +11,6 @@ badWords = ["evil","mean","ugly","dishonorable","stupid","stinky"]
 subjectsObjects = ["I", "you", "they", "everyone", "me"]
 verbs = ["think","say","know","yell","believe","whisper"]
 
-initInbox :: Counter -> User -> IO InMsg
-initInbox count user = do
-    x <- newEmptyMVar
-    let i = InMsg x
-    forkIO (inbox count i user)
-    return i
-
-initOutbox :: Counter -> User -> IO InMsg
-initOutbox count user = forkIO (outbox count i user)
-
 --builds a random message
 constructMessage :: User -> IO Message
 constructMessage user = do
@@ -35,46 +25,49 @@ constructMessage user = do
     let msgString = (subjectsObjects !! objIndex) <> " " <> (verbs !! verbIndex) <> " " <> (subjectsObjects !! subjIndex) <> " " <> sentimentWord
     return (Message msgString sentiment (name user)) 
 
---outbox function, sends message from one user to other users
-outbox :: Counter -> User -> [IO InMsg] -> IO()
-outbox (Counter y) user receivers = loop
+initUser :: IO User
+initUser x = do
+    m <- newMVar 0.0
+    im <- newEmptyMVar
+    let u = User{name = x, messages = [], mood = m, inMsg = im}
+    return u
+
+simulateUserInbox :: User -> IO()
+simulateUserInbox user counter = loop
     where
         loop = do
-            let msg = constructMessage
-            ctr <- takeMVar y
-            receiverIndex <- randomRIO (0, (length receivers)-1)
-            receiver <- receivers !! receiverIndex
-            threadDelay ((2 - (mood user))*10000) :: Int
-            sendMessage receiver msg
-
-
-sendMessage :: InMsg -> Message -> IO()
-sendMessage (InMsg x) msg = putMVar x msg
-
---io function for the forkIO thread
-inbox :: Counter -> InMsg -> User -> IO()
-inbox (Counter y) (InMsg x) user = loop
-    where
-        loop = do
-            msg <- takeMVar x
-            ctr <- takeMVar y
-            case (ctr < 100) of
+            msg <- takeMVar (inMsg user)
+            m <- takeMVar (mood user)
+            count <- takeMVar counter
+            case (count < 100) of
                 True -> do
                     case (sentiment msg) of
-                        Good -> do 
-                            --0.01 chosen cos there's maximum 100 messages so mood can never go outside -1 to 1 range
-                            let user = User {name = (name user), messages = (messages user) ++ [msg], mood = (mood user) + 0.01}
-                            loop
-                        Bad -> do
-                            let user = User {name = (name user), messages = (messages user) ++ [msg], mood = (mood user) - 0.01}
-                            loop
+                        Good -> putMVar (mood user) (m + 0.01)
+                        Bad -> putMVar (mood user) (m - 0.01)
+                    putMVar counter count
                 False -> do
-                    putStrLn "inbox closed"
+                    putStrLn "Closing Inbox"
+
+simulateUserOutbox :: User -> [IO User] -> IO()
+simulateUserOutbox user recipients counter = loop
+    where
+        loop = do
+            let msg = constructMessage user
+            recipientIndex <- randomRIO (0, (length recipients) -1)
+            recipient <- recipients !! recipientIndex
+            count <- takeMVar counter
+            --not sending messages to themselves
+            case (recipient == user) of
+                True -> loop
+                False -> do
+                    m <- takeMVar (mood user)
+                    threadDelay ((2 - m)*10000)
+                    putMVar (inMsg recipient) msg
+                    putMVar (mood user) m
+                    putMVar counter (count + 1)
 
 main :: IO ()
 main = do
-    let users = [User{name = x, messages = [], mood = 0.0} | x <- names]
+    let users = [initUser x | x <- names]
     ctr <- newMVar 0
     let count = Counter ctr
-    let inboxes = [initInbox count user | user <- users]
-    putStrLn "simulation finished"
